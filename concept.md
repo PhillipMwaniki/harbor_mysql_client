@@ -201,30 +201,55 @@ Strict separation:
 
 ---
 
-## 8. Key Libraries (Recommended)
+## 8. Key Libraries (Final Selection)
 
-### Core
+### MySQL Connectivity
 
-* `flutter_riverpod`
-* `collection`
-* `path_provider`
-* `encrypt`
+* `mysql_client` — Pure Dart MySQL client with binary protocol support
+  * Supports MySQL 5.7, 8.x and MariaDB 10.x
+  * Real prepared statements (binary protocol)
+  * TLS support built-in
+  * **Note:** If maintenance stalls, migrate to `mysql_client_plus` (maintained fork)
 
-### UI
+### State Management
 
-* `flutter_code_editor`
-* `highlight`
-* `data_table_2` (or custom virtual grid)
-* `window_manager`
+* `flutter_riverpod` — Predictable, testable, no widget coupling
+
+### UI - Query Editor
+
+* `syntax_highlight` — VSCode-style TextMate grammar highlighting
+  * Explicit SQL support out of the box
+  * Bundled CodeEditor widget for basic editing
+  * Alternative: `flutter_code_editor` (by Akvelon) for richer features like code folding
+
+### UI - Results Grid
+
+* `material_table_view` — **Primary choice**
+  * Lazy-built fixed-height rows (supports billions of rows)
+  * Horizontal and vertical scrolling
+  * Frozen columns support
+  * **Fallback:** `mahop_data_table` (virtual scrolling with variable row heights, Feb 2025)
+  * **Avoid:** `data_table_2` — not designed for 50k+ rows
+
+### UI - Window & Layout
+
+* `window_manager` — Window controls, title bar customization
+* `multi_split_view` — Resizable split panels
+
+### Security & Storage
+
+* `flutter_secure_storage` — Platform-native secure credential storage
+  * Windows: Uses Windows Credential Manager (requires C++ ATL libs)
+  * Automatic key management
+  * **Note:** Requires Visual Studio Build Tools with C++ ATL component
+* `isar` — Local database for connection metadata, query history
+  * Fast embedded NoSQL database
+  * Works well on Windows desktop
 
 ### System Integration
 
-* `process_run` (spawn SSH)
-* `ffi` (future native bindings)
-
-### Local Storage
-
-* `sqflite` or `isar`
+* `dart:io Process` — Spawn SSH process (prefer over `process_run` for simplicity)
+* `path_provider` — Platform-appropriate directories
 
 ---
 
@@ -286,7 +311,78 @@ Characteristics:
 
 ---
 
-## 12. Success Criteria for POC
+## 12. Identified Concerns & Resolutions
+
+### 12.1 SSH Availability on Windows
+
+**Concern:** The design assumes `ssh` binary availability. While Windows 10 (1809+) includes OpenSSH as an optional feature, it may not be installed on all systems.
+
+**Resolution:**
+* On startup, check for SSH availability using `where ssh` or `Get-Command ssh`
+* If not found, display a clear message with installation instructions:
+  * Settings → Apps → Optional Features → Add OpenSSH Client
+  * Or via PowerShell: `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0`
+* Windows Server 2025 ships with OpenSSH by default
+* Store SSH path in settings to allow custom SSH binary location
+
+### 12.2 Query Cancellation
+
+**Concern:** MySQL does not natively support query cancellation from the client connection. A long-running query cannot be stopped from the same connection that issued it.
+
+**Resolution:**
+* Maintain a secondary "control" connection per active connection
+* When user clicks "Stop", issue `KILL QUERY <connection_id>` from control connection
+* Retrieve connection ID via `SELECT CONNECTION_ID()` on primary connection
+* Handle edge cases:
+  * Control connection failure → warn user, suggest manual kill
+  * Query completes before kill → graceful no-op
+
+### 12.3 Results Grid Performance
+
+**Concern:** `data_table_2` is not designed for 50k+ rows. Flutter's default DataTable renders all rows, causing UI freeze.
+
+**Resolution:**
+* Use `material_table_view` as primary grid implementation
+  * Supports lazy-built rows (only renders visible viewport)
+  * Fixed-height rows enable predictable scroll positions
+* Fallback to `mahop_data_table` if variable row heights needed
+* Implement result set pagination at the application layer:
+  * Fetch in chunks (e.g., 10,000 rows)
+  * Stream results to grid as they arrive
+* Add "Limit Results" option in query settings (default: 1,000)
+
+### 12.4 Credential Storage on Windows
+
+**Concern:** The `encrypt` package requires manual key management. If keys are stored insecurely, encryption is pointless.
+
+**Resolution:**
+* Use `flutter_secure_storage` instead of raw `encrypt`
+  * Leverages Windows Credential Manager
+  * Automatic key management by OS
+* Requires Visual Studio Build Tools with C++ ATL — document in README
+* For SSH private keys: store file path only, not key contents
+* Never log or print credentials (enforce via code review)
+
+### 12.5 Testing Strategy
+
+**Concern:** No testing approach was defined for validating SSH tunnel cleanup and query performance.
+
+**Resolution:**
+* **Unit tests:** Connection manager, query parsing, result set adapter
+* **Integration tests:**
+  * SSH tunnel lifecycle (connect, query, disconnect, crash recovery)
+  * Use Docker MySQL container for reproducible test environment
+* **Performance benchmarks:**
+  * Measure grid render time for 1k, 10k, 50k, 100k rows
+  * Track memory usage during large result sets
+  * Automated regression tests in CI
+* **Manual test checklist:**
+  * Kill app during active SSH tunnel → verify no zombie `ssh.exe` processes
+  * Network disconnect during query → verify graceful error handling
+
+---
+
+## 13. Success Criteria for POC
 
 The POC is successful if:
 
@@ -297,7 +393,7 @@ The POC is successful if:
 
 ---
 
-## 13. Estimated Effort
+## 14. Estimated Effort
 
 | Phase               | Duration |
 | ------------------- | -------- |
@@ -311,7 +407,7 @@ The POC is successful if:
 
 ---
 
-## 14. Next Steps (Post-POC)
+## 15. Next Steps (Post-POC)
 
 * Native MySQL driver binding
 * Saved query library
@@ -327,4 +423,3 @@ If this foundation is solid, everything else becomes easy.
 If it is not, the project should be killed early.
 
 That is success either way.
-
