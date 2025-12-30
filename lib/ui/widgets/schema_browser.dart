@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../models/connection_info.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/database_provider.dart';
 
-class SchemaBrowser extends StatefulWidget {
+class SchemaBrowser extends ConsumerStatefulWidget {
   final String? selectedDatabase;
   final String? selectedTable;
   final ValueChanged<String>? onDatabaseSelected;
@@ -16,13 +17,32 @@ class SchemaBrowser extends StatefulWidget {
   });
 
   @override
-  State<SchemaBrowser> createState() => _SchemaBrowserState();
+  ConsumerState<SchemaBrowser> createState() => _SchemaBrowserState();
 }
 
-class _SchemaBrowserState extends State<SchemaBrowser> {
+class _SchemaBrowserState extends ConsumerState<SchemaBrowser> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
-  final Set<String> _expandedDatabases = {'app_dev'};
+  final Set<String> _expandedDatabases = {};
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-expand selected database
+    if (widget.selectedDatabase != null) {
+      _expandedDatabases.add(widget.selectedDatabase!);
+    }
+  }
+
+  @override
+  void didUpdateWidget(SchemaBrowser oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Auto-expand when database changes
+    if (widget.selectedDatabase != null &&
+        widget.selectedDatabase != oldWidget.selectedDatabase) {
+      _expandedDatabases.add(widget.selectedDatabase!);
+    }
+  }
 
   @override
   void dispose() {
@@ -33,6 +53,10 @@ class _SchemaBrowserState extends State<SchemaBrowser> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final databasesAsync = ref.watch(databaseListProvider);
+    final tablesAsync = ref.watch(tableListProvider);
+    final columnsAsync = ref.watch(columnListProvider);
+    final tableInfoAsync = ref.watch(tableInfoProvider);
 
     return Column(
       children: [
@@ -67,58 +91,86 @@ class _SchemaBrowserState extends State<SchemaBrowser> {
         ),
         // Database/Table tree
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            children: MockData.databases.map((db) {
-              final isExpanded = _expandedDatabases.contains(db);
-              final isSelected = widget.selectedDatabase == db;
-              final tables = MockData.tables
-                  .where((t) => _searchQuery.isEmpty || t.toLowerCase().contains(_searchQuery))
-                  .toList();
+          child: databasesAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            error: (e, _) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text('Error: $e', style: theme.textTheme.bodySmall),
+              ),
+            ),
+            data: (databases) {
+              if (databases.isEmpty) {
+                return Center(
+                  child: Text('No databases found', style: theme.textTheme.bodySmall),
+                );
+              }
 
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Database item
-                  _TreeItem(
-                    icon: Icons.storage_rounded,
-                    iconColor: const Color(0xFF4EC9B0),
-                    label: db,
-                    isSelected: isSelected && widget.selectedTable == null,
-                    isExpanded: isExpanded,
-                    hasChildren: true,
-                    onTap: () {
-                      widget.onDatabaseSelected?.call(db);
-                    },
-                    onExpandToggle: () {
-                      setState(() {
-                        if (isExpanded) {
-                          _expandedDatabases.remove(db);
-                        } else {
-                          _expandedDatabases.add(db);
-                        }
-                      });
-                    },
-                  ),
-                  // Tables
-                  if (isExpanded)
-                    ...tables.map((table) {
-                      final isTableSelected = widget.selectedDatabase == db && widget.selectedTable == table;
-                      return _TreeItem(
-                        icon: Icons.table_chart_outlined,
-                        iconColor: const Color(0xFF569CD6),
-                        label: table,
-                        isSelected: isTableSelected,
-                        indent: 1,
+              return ListView(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                children: databases.map((db) {
+                  final isExpanded = _expandedDatabases.contains(db);
+                  final isSelected = widget.selectedDatabase == db;
+
+                  // Get tables for this database if expanded and selected
+                  final tables = (isExpanded && isSelected)
+                      ? tablesAsync.valueOrNull ?? []
+                      : <String>[];
+
+                  final filteredTables = tables
+                      .where((t) => _searchQuery.isEmpty || t.toLowerCase().contains(_searchQuery))
+                      .toList();
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Database item
+                      _TreeItem(
+                        icon: Icons.storage_rounded,
+                        iconColor: const Color(0xFF4EC9B0),
+                        label: db,
+                        isSelected: isSelected && widget.selectedTable == null,
+                        isExpanded: isExpanded,
+                        hasChildren: true,
+                        isLoading: isExpanded && isSelected && tablesAsync.isLoading,
                         onTap: () {
                           widget.onDatabaseSelected?.call(db);
-                          widget.onTableSelected?.call(table);
+                          if (!_expandedDatabases.contains(db)) {
+                            setState(() => _expandedDatabases.add(db));
+                          }
                         },
-                      );
-                    }),
-                ],
+                        onExpandToggle: () {
+                          setState(() {
+                            if (isExpanded) {
+                              _expandedDatabases.remove(db);
+                            } else {
+                              _expandedDatabases.add(db);
+                              // Select database when expanding
+                              widget.onDatabaseSelected?.call(db);
+                            }
+                          });
+                        },
+                      ),
+                      // Tables
+                      if (isExpanded && isSelected)
+                        ...filteredTables.map((table) {
+                          final isTableSelected = widget.selectedTable == table;
+                          return _TreeItem(
+                            icon: Icons.table_chart_outlined,
+                            iconColor: const Color(0xFF569CD6),
+                            label: table,
+                            isSelected: isTableSelected,
+                            indent: 1,
+                            onTap: () {
+                              widget.onTableSelected?.call(table);
+                            },
+                          );
+                        }),
+                    ],
+                  );
+                }).toList(),
               );
-            }).toList(),
+            },
           ),
         ),
         // Table info footer
@@ -139,28 +191,44 @@ class _SchemaBrowserState extends State<SchemaBrowser> {
                   style: theme.textTheme.titleMedium,
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  '${MockData.columns.length} columns • ~1,234 rows',
-                  style: theme.textTheme.bodySmall,
+                // Show real table info
+                tableInfoAsync.when(
+                  loading: () => Text('Loading...', style: theme.textTheme.bodySmall),
+                  error: (e, _) => Text('Error loading info', style: theme.textTheme.bodySmall),
+                  data: (info) {
+                    final colCount = columnsAsync.valueOrNull?.length ?? 0;
+                    final rowCount = info?.rows ?? 0;
+                    return Text(
+                      '$colCount columns • ~$rowCount rows',
+                      style: theme.textTheme.bodySmall,
+                    );
+                  },
                 ),
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
-                  children: MockData.columns.take(4).map((col) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surface,
-                        borderRadius: BorderRadius.circular(3),
-                        border: Border.all(color: theme.dividerColor),
-                      ),
-                      child: Text(
-                        col['name'] as String,
-                        style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
-                      ),
+                // Show column names
+                columnsAsync.when(
+                  loading: () => const SizedBox.shrink(),
+                  error: (e, _) => const SizedBox.shrink(),
+                  data: (columns) {
+                    return Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: columns.take(4).map((col) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surface,
+                            borderRadius: BorderRadius.circular(3),
+                            border: Border.all(color: theme.dividerColor),
+                          ),
+                          child: Text(
+                            col.name,
+                            style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
+                          ),
+                        );
+                      }).toList(),
                     );
-                  }).toList(),
+                  },
                 ),
               ],
             ),
@@ -177,6 +245,7 @@ class _TreeItem extends StatelessWidget {
   final bool isSelected;
   final bool isExpanded;
   final bool hasChildren;
+  final bool isLoading;
   final int indent;
   final VoidCallback? onTap;
   final VoidCallback? onExpandToggle;
@@ -188,6 +257,7 @@ class _TreeItem extends StatelessWidget {
     this.isSelected = false,
     this.isExpanded = false,
     this.hasChildren = false,
+    this.isLoading = false,
     this.indent = 0,
     this.onTap,
     this.onExpandToggle,
@@ -207,17 +277,23 @@ class _TreeItem extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Expand/collapse arrow
+            // Expand/collapse arrow or loading indicator
             if (hasChildren)
               GestureDetector(
                 onTap: onExpandToggle,
                 child: SizedBox(
                   width: 16,
-                  child: Icon(
-                    isExpanded ? Icons.expand_more : Icons.chevron_right,
-                    size: 14,
-                    color: theme.iconTheme.color,
-                  ),
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 1.5),
+                        )
+                      : Icon(
+                          isExpanded ? Icons.expand_more : Icons.chevron_right,
+                          size: 14,
+                          color: theme.iconTheme.color,
+                        ),
                 ),
               )
             else

@@ -31,6 +31,38 @@ class ConnectionInfo {
     this.color,
   });
 
+  /// Convert to JSON map (without sensitive data)
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'host': host,
+    'port': port,
+    'username': username,
+    'database': database,
+    'useSSH': useSSH,
+    'sshHost': sshHost,
+    'sshPort': sshPort,
+    'sshUsername': sshUsername,
+    'sshKeyPath': sshKeyPath,
+    'color': color,
+  };
+
+  /// Create from JSON map
+  factory ConnectionInfo.fromJson(Map<String, dynamic> json) => ConnectionInfo(
+    id: json['id'] as String,
+    name: json['name'] as String,
+    host: json['host'] as String,
+    port: json['port'] as int? ?? 3306,
+    username: json['username'] as String,
+    database: json['database'] as String?,
+    useSSH: json['useSSH'] as bool? ?? false,
+    sshHost: json['sshHost'] as String?,
+    sshPort: json['sshPort'] as int? ?? 22,
+    sshUsername: json['sshUsername'] as String?,
+    sshKeyPath: json['sshKeyPath'] as String?,
+    color: json['color'] as String?,
+  );
+
   ConnectionInfo copyWith({
     String? id,
     String? name,

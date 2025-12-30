@@ -10,8 +10,20 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Core Flutter dependencies only for now
+  # MySQL connectivity
+  mysql_client: ^0.0.27
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Icons
   cupertino_icons: ^1.0.8
+
+  # Secure storage for credentials
+  flutter_secure_storage: ^9.2.2
+
+  # JSON serialization
+  json_annotation: ^4.9.0
 
 dev_dependencies:
   flutter_test:
