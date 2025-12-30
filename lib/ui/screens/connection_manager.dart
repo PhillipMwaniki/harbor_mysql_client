@@ -45,7 +45,8 @@ class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
   @override
   void initState() {
     super.initState();
-    _selectedConnection = widget.selectedConnection ?? widget.connections.firstOrNull;
+    final connections = ref.read(savedConnectionsProvider);
+    _selectedConnection = widget.selectedConnection ?? connections.firstOrNull;
     if (_selectedConnection != null) {
       _populateForm(_selectedConnection!);
     }
@@ -169,6 +170,8 @@ class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Watch the provider directly to get updates when connections change
+    final connections = ref.watch(savedConnectionsProvider);
 
     return Dialog(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -241,9 +244,9 @@ class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
                         // Connection items
                         Expanded(
                           child: ListView.builder(
-                            itemCount: widget.connections.length,
+                            itemCount: connections.length,
                             itemBuilder: (context, index) {
-                              final conn = widget.connections[index];
+                              final conn = connections[index];
                               final isSelected = _selectedConnection?.id == conn.id;
                               return _ConnectionListItem(
                                 connection: conn,
