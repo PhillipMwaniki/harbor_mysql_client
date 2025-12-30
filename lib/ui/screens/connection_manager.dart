@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/connection_info.dart';
+import '../../providers/database_provider.dart';
 import '../theme/app_theme.dart';
 
-class ConnectionManager extends StatefulWidget {
+class ConnectionManager extends ConsumerStatefulWidget {
   final List<ConnectionInfo> connections;
   final ConnectionInfo? selectedConnection;
   final ValueChanged<ConnectionInfo>? onConnectionSelected;
@@ -19,10 +21,10 @@ class ConnectionManager extends StatefulWidget {
   });
 
   @override
-  State<ConnectionManager> createState() => _ConnectionManagerState();
+  ConsumerState<ConnectionManager> createState() => _ConnectionManagerState();
 }
 
-class _ConnectionManagerState extends State<ConnectionManager> {
+class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
   ConnectionInfo? _selectedConnection;
   bool _isTesting = false;
   String? _testResult;
@@ -93,6 +95,75 @@ class _ConnectionManagerState extends State<ConnectionManager> {
         });
       }
     });
+  }
+
+  ConnectionInfo _buildConnectionFromForm({String? existingId}) {
+    return ConnectionInfo(
+      id: existingId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      name: _nameController.text.isEmpty ? 'New Connection' : _nameController.text,
+      host: _hostController.text.isEmpty ? 'localhost' : _hostController.text,
+      port: int.tryParse(_portController.text) ?? 3306,
+      username: _usernameController.text,
+      password: _passwordController.text.isEmpty ? null : _passwordController.text,
+      database: _databaseController.text.isEmpty ? null : _databaseController.text,
+      useSSH: _useSSH,
+      sshHost: _sshHostController.text.isEmpty ? null : _sshHostController.text,
+      sshPort: int.tryParse(_sshPortController.text) ?? 22,
+      sshUsername: _sshUsernameController.text.isEmpty ? null : _sshUsernameController.text,
+      sshPassword: _sshPasswordController.text.isEmpty ? null : _sshPasswordController.text,
+      color: _selectedConnection?.color ?? '#4EC9B0',
+    );
+  }
+
+  Future<void> _saveConnection() async {
+    final notifier = ref.read(savedConnectionsProvider.notifier);
+
+    if (_selectedConnection != null) {
+      // Update existing connection
+      final updated = _buildConnectionFromForm(existingId: _selectedConnection!.id);
+      await notifier.update(updated);
+      setState(() {
+        _selectedConnection = updated;
+      });
+    } else {
+      // Add new connection
+      final newConn = _buildConnectionFromForm();
+      await notifier.add(newConn);
+      setState(() {
+        _selectedConnection = newConn;
+      });
+    }
+  }
+
+  Future<void> _deleteConnection() async {
+    if (_selectedConnection == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Connection'),
+        content: Text('Are you sure you want to delete "${_selectedConnection!.name}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await ref.read(savedConnectionsProvider.notifier).remove(_selectedConnection!.id);
+      setState(() {
+        _selectedConnection = null;
+        _clearForm();
+      });
+    }
   }
 
   @override
@@ -209,22 +280,33 @@ class _ConnectionManagerState extends State<ConnectionManager> {
               ),
               child: Row(
                 children: [
+                  // Delete button (only for existing connections)
+                  if (_selectedConnection != null)
+                    TextButton.icon(
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      label: const Text('Delete'),
+                      style: TextButton.styleFrom(foregroundColor: Colors.red.shade400),
+                      onPressed: _deleteConnection,
+                    ),
                   if (_testResult != null)
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.check_circle,
-                          size: 16,
-                          color: AppTheme.statusConnected,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _testResult!,
-                          style: theme.textTheme.bodySmall?.copyWith(
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 16,
                             color: AppTheme.statusConnected,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 6),
+                          Text(
+                            _testResult!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: AppTheme.statusConnected,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   const Spacer(),
                   TextButton(
@@ -235,13 +317,22 @@ class _ConnectionManagerState extends State<ConnectionManager> {
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Test Connection'),
+                        : const Text('Test'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: _saveConnection,
+                    child: const Text('Save'),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton(
-                    onPressed: _selectedConnection != null
-                        ? () => widget.onConnect?.call(_selectedConnection!)
-                        : null,
+                    onPressed: () async {
+                      // Save before connecting
+                      await _saveConnection();
+                      if (_selectedConnection != null) {
+                        widget.onConnect?.call(_selectedConnection!);
+                      }
+                    },
                     child: const Text('Connect'),
                   ),
                 ],

@@ -1,77 +1,147 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/connection_info.dart';
+import '../../providers/database_provider.dart';
 import '../widgets/app_toolbar.dart';
 import '../widgets/schema_browser.dart';
 import '../widgets/content_tabs.dart';
 import 'connection_manager.dart';
 
-class MainScreen extends StatefulWidget {
+class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
 
   @override
-  State<MainScreen> createState() => _MainScreenState();
+  ConsumerState<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends ConsumerState<MainScreen> {
   double _sidebarWidth = 220;
   final double _minSidebarWidth = 150;
   final double _maxSidebarWidth = 400;
 
-  ConnectionInfo? _currentConnection;
-  String? _selectedDatabase;
-  String? _selectedTable;
-  bool _isConnected = false;
-
   void _showConnectionManager() {
+    final savedConnections = ref.read(savedConnectionsProvider);
+
     showDialog(
       context: context,
       builder: (context) => ConnectionManager(
-        connections: MockData.connections,
-        selectedConnection: _currentConnection,
+        connections: savedConnections,
+        selectedConnection: ref.read(connectionProvider).connection,
         onConnectionSelected: (conn) {
-          setState(() => _currentConnection = conn);
+          // Just selecting, not connecting yet
         },
-        onConnect: (conn) {
-          setState(() {
-            _currentConnection = conn;
-            _isConnected = true;
-            _selectedDatabase = conn.database ?? MockData.databases.first;
-          });
+        onConnect: (conn) async {
           Navigator.of(context).pop();
+          await _connect(conn);
         },
         onClose: () => Navigator.of(context).pop(),
       ),
     );
   }
 
-  void _disconnect() {
-    setState(() {
-      _isConnected = false;
-      _selectedDatabase = null;
-      _selectedTable = null;
-    });
+  Future<void> _connect(ConnectionInfo conn) async {
+    final success = await ref.read(connectionProvider.notifier).connect(conn);
+
+    if (success && mounted) {
+      // Set the initial database
+      final databases = await ref.read(mysqlServiceProvider).getDatabases();
+      if (databases.isNotEmpty) {
+        final defaultDb = conn.database ?? databases.first;
+        ref.read(currentDatabaseProvider.notifier).state = defaultDb;
+        await ref.read(mysqlServiceProvider).useDatabase(defaultDb);
+      }
+    } else if (mounted) {
+      // Show error dialog with copyable text
+      final error = ref.read(connectionProvider).error ?? 'Unknown error';
+      _showErrorDialog('Connection Failed', error);
+    }
+  }
+
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.red.shade400, size: 24),
+            const SizedBox(width: 8),
+            Text(title),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Error details (tap to copy):',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: SelectableText(
+                message,
+                style: const TextStyle(
+                  fontFamily: 'Consolas',
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _disconnect() async {
+    await ref.read(connectionProvider.notifier).disconnect();
+    ref.read(currentDatabaseProvider.notifier).state = null;
+    ref.read(selectedTableProvider.notifier).state = null;
+  }
+
+  void _refresh() {
+    // Invalidate all data providers to refresh
+    ref.invalidate(databaseListProvider);
+    ref.invalidate(tableListProvider);
+    ref.invalidate(columnListProvider);
+    ref.invalidate(tableContentProvider);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final connectionState = ref.watch(connectionProvider);
+    final isConnected = connectionState.status == ConnectionStatus.connected;
+    final isConnecting = connectionState.status == ConnectionStatus.connecting;
 
     return Scaffold(
       body: Column(
         children: [
           // Toolbar
           AppToolbar(
-            connectionName: _currentConnection?.name,
-            isConnected: _isConnected,
+            connectionName: connectionState.connection?.name,
+            isConnected: isConnected,
             onConnectionTap: _showConnectionManager,
             onDisconnect: _disconnect,
-            onRefresh: () {
-              setState(() {});
-            },
+            onRefresh: _refresh,
           ),
+          // Loading indicator when connecting
+          if (isConnecting)
+            LinearProgressIndicator(
+              backgroundColor: theme.colorScheme.surface,
+              color: theme.colorScheme.primary,
+            ),
           // Main content
           Expanded(
-            child: _isConnected ? _buildMainContent(theme) : _buildWelcomeScreen(theme),
+            child: isConnected ? _buildMainContent(theme) : _buildWelcomeScreen(theme),
           ),
         ],
       ),
@@ -79,6 +149,9 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _buildMainContent(ThemeData theme) {
+    final currentDb = ref.watch(currentDatabaseProvider);
+    final selectedTable = ref.watch(selectedTableProvider);
+
     return Row(
       children: [
         // Schema browser with resizable width
@@ -87,13 +160,16 @@ class _MainScreenState extends State<MainScreen> {
           child: Container(
             color: theme.colorScheme.surface,
             child: SchemaBrowser(
-              selectedDatabase: _selectedDatabase,
-              selectedTable: _selectedTable,
-              onDatabaseSelected: (db) {
-                setState(() => _selectedDatabase = db);
+              selectedDatabase: currentDb,
+              selectedTable: selectedTable,
+              onDatabaseSelected: (db) async {
+                ref.read(currentDatabaseProvider.notifier).state = db;
+                ref.read(selectedTableProvider.notifier).state = null;
+                await ref.read(mysqlServiceProvider).useDatabase(db);
+                ref.invalidate(tableListProvider);
               },
               onTableSelected: (table) {
-                setState(() => _selectedTable = table);
+                ref.read(selectedTableProvider.notifier).state = table;
               },
             ),
           ),
@@ -127,7 +203,7 @@ class _MainScreenState extends State<MainScreen> {
         // Content area
         Expanded(
           child: ContentTabs(
-            selectedTable: _selectedTable,
+            selectedTable: selectedTable,
             initialTab: ContentTab.content,
           ),
         ),
@@ -136,6 +212,8 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _buildWelcomeScreen(ThemeData theme) {
+    final savedConnections = ref.watch(savedConnectionsProvider);
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -167,26 +245,20 @@ class _MainScreenState extends State<MainScreen> {
           ),
           const SizedBox(height: 48),
           // Recent connections
-          if (MockData.connections.isNotEmpty) ...[
+          if (savedConnections.isNotEmpty) ...[
             Text(
-              'Recent Connections',
+              'Saved Connections',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 16),
-            ...MockData.connections.take(3).map((conn) {
+            ...savedConnections.take(3).map((conn) {
               final color = conn.color != null
                   ? Color(int.parse(conn.color!.replaceFirst('#', '0xFF')))
                   : theme.colorScheme.primary;
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: InkWell(
-                  onTap: () {
-                    setState(() {
-                      _currentConnection = conn;
-                      _isConnected = true;
-                      _selectedDatabase = conn.database ?? MockData.databases.first;
-                    });
-                  },
+                  onTap: () => _connect(conn),
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
                     width: 280,
