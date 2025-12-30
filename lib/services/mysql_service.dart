@@ -113,10 +113,10 @@ class MySqlService {
         userName: info.username,
         password: info.password ?? '',
         databaseName: info.database,
-        secure: true,
+        secure: info.useSSL,
       );
-
       await _connection!.connect();
+
       _connectionInfo = info;
 
       // Get connection ID for query cancellation

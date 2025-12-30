@@ -6,6 +6,7 @@ class ConnectionInfo {
   final String username;
   final String? password;
   final String? database;
+  final bool useSSL;
   final bool useSSH;
   final String? sshHost;
   final int? sshPort;
@@ -22,6 +23,7 @@ class ConnectionInfo {
     required this.username,
     this.password,
     this.database,
+    this.useSSL = false,
     this.useSSH = false,
     this.sshHost,
     this.sshPort = 22,
@@ -39,6 +41,7 @@ class ConnectionInfo {
     'port': port,
     'username': username,
     'database': database,
+    'useSSL': useSSL,
     'useSSH': useSSH,
     'sshHost': sshHost,
     'sshPort': sshPort,
@@ -55,6 +58,7 @@ class ConnectionInfo {
     port: json['port'] as int? ?? 3306,
     username: json['username'] as String,
     database: json['database'] as String?,
+    useSSL: json['useSSL'] as bool? ?? false,
     useSSH: json['useSSH'] as bool? ?? false,
     sshHost: json['sshHost'] as String?,
     sshPort: json['sshPort'] as int? ?? 22,
@@ -71,6 +75,7 @@ class ConnectionInfo {
     String? username,
     String? password,
     String? database,
+    bool? useSSL,
     bool? useSSH,
     String? sshHost,
     int? sshPort,
@@ -87,6 +92,7 @@ class ConnectionInfo {
       username: username ?? this.username,
       password: password ?? this.password,
       database: database ?? this.database,
+      useSSL: useSSL ?? this.useSSL,
       useSSH: useSSH ?? this.useSSH,
       sshHost: sshHost ?? this.sshHost,
       sshPort: sshPort ?? this.sshPort,

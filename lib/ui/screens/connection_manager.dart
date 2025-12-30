@@ -40,6 +40,7 @@ class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
   final _sshPortController = TextEditingController(text: '22');
   final _sshUsernameController = TextEditingController();
   final _sshPasswordController = TextEditingController();
+  bool _useSSL = false;
   bool _useSSH = false;
 
   @override
@@ -74,6 +75,7 @@ class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
     _usernameController.text = conn.username;
     _passwordController.text = conn.password ?? '';
     _databaseController.text = conn.database ?? '';
+    _useSSL = conn.useSSL;
     _useSSH = conn.useSSH;
     _sshHostController.text = conn.sshHost ?? '';
     _sshPortController.text = (conn.sshPort ?? 22).toString();
@@ -107,6 +109,7 @@ class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
       username: _usernameController.text,
       password: _passwordController.text.isEmpty ? null : _passwordController.text,
       database: _databaseController.text.isEmpty ? null : _databaseController.text,
+      useSSL: _useSSL,
       useSSH: _useSSH,
       sshHost: _sshHostController.text.isEmpty ? null : _sshHostController.text,
       sshPort: int.tryParse(_sshPortController.text) ?? 22,
@@ -354,6 +357,7 @@ class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
     _usernameController.clear();
     _passwordController.clear();
     _databaseController.clear();
+    _useSSL = false;
     _useSSH = false;
     _sshHostController.clear();
     _sshPortController.text = '22';
@@ -435,6 +439,30 @@ class _ConnectionManagerState extends ConsumerState<ConnectionManager> {
               controller: _databaseController,
               decoration: const InputDecoration(hintText: 'my_database'),
             ),
+          ),
+          const SizedBox(height: 16),
+          // SSL/TLS option
+          Row(
+            children: [
+              Checkbox(
+                value: _useSSL,
+                onChanged: (value) => setState(() => _useSSL = value ?? false),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Use SSL/TLS', style: theme.textTheme.bodyMedium),
+                    Text(
+                      'Required for caching_sha2_password authentication',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           // SSH section
